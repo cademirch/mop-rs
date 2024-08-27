@@ -1,25 +1,22 @@
+use crate::Region;
 use anyhow::{Context, Result};
 use d4::{
     task::{Mean, Task, TaskOutputVec, TaskPartition},
     D4MatrixReader, D4TrackReader, MultiTrackReader,
 };
 use log::{error, trace};
+use std::collections::HashMap;
 use std::{panic, path::Path}; // Make sure to include this import for tracing
-
 pub struct TaskPart {
     parent_region: (String, u32, u32),
-    part_begin: u32,
-    part_end: u32,
     thresholds: (f64, f64),
-    count_sum: Vec<(u32,u32)>,
+    count_sum: Vec<(u32, u32)>,
     mean_depth_min: f64,
-    depth_proportion: f64
-    
 }
 
 impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart {
     type ParentType = TaskParent;
-    type ResultType = Vec<(u32,u32)>;
+    type ResultType = Vec<(u32, u32)>;
 
     fn new(part_begin: u32, part_end: u32, parent: &Self::ParentType) -> Self {
         trace!(
@@ -33,12 +30,8 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
         Self {
             parent_region: (parent.chrom.clone(), parent.begin, parent.end),
             thresholds: parent.thresholds,
-            part_begin: part_begin,
-            part_end: part_end,
-            count_sum: vec![(0,0); (part_end - part_begin) as usize],
+            count_sum: vec![(0, 0); (part_end - part_begin) as usize],
             mean_depth_min: parent.mean_depth_min,
-            depth_proportion: parent.depth_proportion
-            
         }
     }
 
@@ -55,12 +48,11 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
         }
 
         for v in value.into_iter() {
+            trace!("Value: {:?}", v);
             self.count_sum[left as usize].1 += v as u32;
-
-            if self.mean_depth_min > 0 as f64 {
-                self.count_sum[left as usize].0 += 1
-            }
-            else if v as f64 >= self.thresholds.0 && v as f64 <= self.thresholds.1 {
+            trace!("Testing if {:?} is greater than {} and less than {}", v, self.thresholds.0, self.thresholds.1);
+            if v as f64 >= self.thresholds.0 && v as f64 <= self.thresholds.1 {
+                
                 self.count_sum[left as usize].0 += 1
             }
         }
@@ -68,7 +60,8 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
     }
 
     fn result(&mut self) -> Self::ResultType {
-        std::mem::take(& mut self.count_sum)
+        trace!("Count sum: {:?}", self.count_sum);
+        std::mem::take(&mut self.count_sum)
     }
 }
 
@@ -79,10 +72,8 @@ pub struct TaskParent {
     thresholds: (f64, f64),
     mean_depth_min: f64,
     depth_proportion: f64,
-    num_tracks: usize
-    
+    num_tracks: usize,
 }
-
 
 impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
     type Partition = TaskPart;
@@ -95,32 +86,35 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
     fn combine(&self, parts: &[Vec<(u32, u32)>]) -> Self::Output {
         trace!("Combining results from TaskParts: {:?}", parts);
         let mut res = vec![(false, 0); self.end as usize - self.begin as usize];
-        // mean_depth_min and depth_proporiton need to be mutually exclusive. if neither, then output counts within thresholds.
+        
         for (index, (count, sum)) in parts.iter().flat_map(|v| v.iter()).enumerate() {
-            if self.mean_depth_min > 0.0 {
-                let mean = *sum as f64 / *count as f64;
-                if mean > self.mean_depth_min {
-                    res[index].0 = true;
-                    trace!("Mean depth: {}", mean)
-                }
-            } else if self.depth_proportion >= 0.0 {
+            trace!("count: {}", count);
+            let mean = *sum as f64 / self.num_tracks as f64;
+            if mean >= self.mean_depth_min {
                 let prop = *count as f64 / self.num_tracks as f64;
                 if prop >= self.depth_proportion {
-                    res[index].0 = true
+                    res[index].0 = true;
+                    res[index].1 = *count;
                 }
-
-            } else {
-                res[index].1 = *count
             }
         }
-       
-
+        
         trace!("Combined result: {:?}", res);
         res
     }
 }
 
-pub fn run_d4_tasks(d4_file_path: &str, thresholds: (f64, f64), mean_depth_min: f64, depth_proportion: f64) -> Result<TaskOutputVec<Vec<(bool, u32)>>> {
+        
+
+        
+
+
+pub fn run_d4_tasks(
+    d4_file_path: &str,
+    thresholds: (f64, f64),
+    mean_depth_min: f64,
+    depth_proportion: f64,
+) -> Result<()> {
     trace!("Running D4 tasks on file: {}", d4_file_path);
 
     let mut tracks: Vec<D4TrackReader> =
@@ -130,6 +124,7 @@ pub fn run_d4_tasks(d4_file_path: &str, thresholds: (f64, f64), mean_depth_min: 
     let num_tracks = tracks.len();
     let mut reader = D4MatrixReader::new(tracks).unwrap();
     let chrom_regions = reader.chrom_regions();
+
     trace!("Chromosome regions found: {:?}", chrom_regions);
 
     let mut tasks = vec![];
@@ -142,7 +137,7 @@ pub fn run_d4_tasks(d4_file_path: &str, thresholds: (f64, f64), mean_depth_min: 
             thresholds,
             mean_depth_min,
             depth_proportion,
-            num_tracks: num_tracks
+            num_tracks: num_tracks,
         });
     }
 
@@ -150,5 +145,10 @@ pub fn run_d4_tasks(d4_file_path: &str, thresholds: (f64, f64), mean_depth_min: 
     let result = reader.run_tasks(tasks).unwrap();
     trace!("Tasks completed successfully");
 
-    Ok(result)
+    // let mut out = HashMap::with_capacity(num_chroms);
+    for r in result.into_iter() {
+        println!("{}:{}-{}, {:?}", r.chrom, r.begin, r.end, r.output);
+    }
+
+    Ok(())
 }
