@@ -1,16 +1,14 @@
 use anyhow::{Context, Result};
 use d4::{
-    task::{Mean, Task, TaskOutputVec, TaskPartition},
+    task::{Task, TaskPartition},
     D4MatrixReader, D4TrackReader, MultiTrackReader,
 };
-use log::{error, trace};
-use std::collections::HashMap;
+use log::trace;
 use std::{panic, path::Path}; // Make sure to include this import for tracing
 pub struct TaskPart {
     parent_region: (String, u32, u32),
     thresholds: (f64, f64),
     count_sum: Vec<(u32, u32)>,
-   
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,7 +35,6 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
             parent_region: (parent.chrom.clone(), parent.begin, parent.end),
             thresholds: parent.thresholds,
             count_sum: vec![(0, 0); (part_end - part_begin) as usize],
-            
         }
     }
 
@@ -83,6 +80,7 @@ pub struct TaskParent {
     mean_depth_min: f64,
     depth_proportion: f64,
     num_tracks: usize,
+    output_counts: bool,
 }
 
 impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
@@ -106,7 +104,8 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
                 if let Some(ref mut region) = current_region {
                     // check if current_region is not none
                     // we have a current region, lets see if we can extend it
-                    if region.end == (self.begin as usize + index) as u32 && region.count == *count
+                    if region.end == (self.begin as usize + index) as u32
+                        && (!self.output_counts || region.count == *count)
                     {
                         region.end += 1;
                     } else {
@@ -141,15 +140,26 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
     }
 }
 
-pub fn print_as_bed(chrom: &str, begin: u32, end: u32, regions: Vec<CallableRegion>) {
+pub fn print_as_bed(chrom: &str, begin: u32, output_counts: bool, regions: Vec<CallableRegion>) {
     for region in regions.into_iter() {
-        println!(
-            "{}\t{}\t{}\t{}",
-            chrom,
-            region.begin + begin,
-            region.end + begin,
-            region.count
-        );
+        if !output_counts {
+            println!(
+                "{}\t{}\t{}",
+                chrom,
+                region.begin + begin,
+                region.end + begin,
+                
+            );
+        } else {
+            println!(
+                "{}\t{}\t{}\t{}",
+                chrom,
+                region.begin + begin,
+                region.end + begin,
+                region.count
+            );
+        }
+        
     }
 }
 
@@ -158,12 +168,12 @@ pub fn run_d4_tasks(
     thresholds: (f64, f64),
     mean_depth_min: f64,
     depth_proportion: f64,
+    output_counts: bool,
 ) -> Result<()> {
     trace!("Running D4 tasks on file: {}", d4_file_path);
 
-    let mut tracks: Vec<D4TrackReader> =
-        D4TrackReader::open_tracks(Path::new(d4_file_path), |_| true)
-            .context("Failed to open D4 file")?;
+    let tracks: Vec<D4TrackReader> = D4TrackReader::open_tracks(Path::new(d4_file_path), |_| true)
+        .context("Failed to open D4 file")?;
     trace!("Successfully opened D4 file with {} tracks", tracks.len());
     let num_tracks = tracks.len();
     let mut reader = D4MatrixReader::new(tracks).unwrap();
@@ -182,6 +192,7 @@ pub fn run_d4_tasks(
             mean_depth_min,
             depth_proportion,
             num_tracks: num_tracks,
+            output_counts,
         });
     }
 
@@ -189,9 +200,8 @@ pub fn run_d4_tasks(
     let result = reader.run_tasks(tasks).unwrap();
     trace!("Tasks completed successfully");
 
-    
     for r in result.into_iter() {
-        print_as_bed(r.chrom, r.begin, r.end, r.output.to_vec())
+        print_as_bed(r.chrom, r.begin, output_counts, r.output.to_vec())
     }
 
     Ok(())
@@ -199,10 +209,12 @@ pub fn run_d4_tasks(
 
 #[cfg(test)]
 mod tests {
+    
+
     use super::*;
 
     type RowType = std::vec::IntoIter<i32>;
-    fn create_task_parent() -> TaskParent {
+    fn create_task_parent(output_counts: bool) -> TaskParent {
         TaskParent {
             chrom: String::from("chr1"),
             begin: 0,
@@ -211,12 +223,34 @@ mod tests {
             mean_depth_min: 10.0,
             depth_proportion: 0.5,
             thresholds: (0.0, 100.0), // this doesnt matter for combine tests
+            output_counts: output_counts,
         }
     }
 
     #[test]
-    fn test_combine_with_adjacent_regions_different_counts() {
-        let task: TaskParent = create_task_parent();
+    fn combine_output_counts_false_adjacent_regions_different_counts() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        let parts = vec![vec![(5, 100), (5, 100), (10, 100), (10, 100)]];
+
+        let expected = vec![
+            CallableRegion {
+                count: 5,
+                begin: 0,
+                end: 4,
+            },
+        ];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_output_counts_true_adjacent_regions_different_counts() {
+        let output_counts = true;
+        let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![vec![(5, 100), (5, 100), (10, 100), (10, 100)]];
 
@@ -238,9 +272,11 @@ mod tests {
         assert_eq!(result, expected);
     }
 
+
     #[test]
-    fn test_combine_with_good_mean_bad_prop() {
-        let task: TaskParent = create_task_parent();
+    fn combine_good_mean_bad_prop() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![vec![(2, 100), (2, 100), (10, 100), (10, 100)]];
 
@@ -256,8 +292,9 @@ mod tests {
     }
 
     #[test]
-    fn test_combine_with_single_continuous_region() {
-        let task: TaskParent = create_task_parent();
+    fn combine_single_continuous_region() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![
             vec![(5, 50), (5, 50), (5, 50)], // mean depth is 5 not callable
@@ -271,8 +308,9 @@ mod tests {
     }
 
     #[test]
-    fn test_combine_with_non_callable_regions() {
-        let task: TaskParent = create_task_parent();
+    fn combine_non_callable_regions() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![
             vec![(1, 100), (1, 100), (5, 50), (5, 50)], // 0-2 okay mean but bad proportion. 2-4 okay proportion but bad mean
@@ -286,8 +324,9 @@ mod tests {
     }
 
     #[test]
-    fn test_combine_with_multiple_separated_regions() {
-        let task: TaskParent = create_task_parent();
+    fn combine_multiple_separated_regions() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![
             vec![(10, 100), (10, 100)], // callable
