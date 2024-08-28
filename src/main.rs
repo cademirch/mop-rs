@@ -38,7 +38,7 @@ struct Args {
     #[arg(short = 'M', long = "max-depth", default_value_t = f64::INFINITY)]
     max_depth: f64,
 
-    #[arg(short = 'd', long = "depth-proportion", default_value_t = 0.0)]
+    #[arg(short = 'd', long = "depth-proportion", default_value_t = 1.0)]
     depth_proportion: f64,
 
     #[arg(short = 'u', long = "min-mean-depth", default_value_t = 0.0)]

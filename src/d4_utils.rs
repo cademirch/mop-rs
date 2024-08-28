@@ -1,4 +1,3 @@
-use crate::Region;
 use anyhow::{Context, Result};
 use d4::{
     task::{Mean, Task, TaskOutputVec, TaskPartition},
@@ -11,7 +10,14 @@ pub struct TaskPart {
     parent_region: (String, u32, u32),
     thresholds: (f64, f64),
     count_sum: Vec<(u32, u32)>,
-    mean_depth_min: f64,
+   
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallableRegion {
+    count: u32,
+    begin: u32,
+    end: u32,
 }
 
 impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart {
@@ -31,7 +37,7 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
             parent_region: (parent.chrom.clone(), parent.begin, parent.end),
             thresholds: parent.thresholds,
             count_sum: vec![(0, 0); (part_end - part_begin) as usize],
-            mean_depth_min: parent.mean_depth_min,
+            
         }
     }
 
@@ -50,9 +56,13 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
         for v in value.into_iter() {
             trace!("Value: {:?}", v);
             self.count_sum[left as usize].1 += v as u32;
-            trace!("Testing if {:?} is greater than {} and less than {}", v, self.thresholds.0, self.thresholds.1);
+            trace!(
+                "Testing if {:?} is greater than {} and less than {}",
+                v,
+                self.thresholds.0,
+                self.thresholds.1
+            );
             if v as f64 >= self.thresholds.0 && v as f64 <= self.thresholds.1 {
-                
                 self.count_sum[left as usize].0 += 1
             }
         }
@@ -77,37 +87,71 @@ pub struct TaskParent {
 
 impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
     type Partition = TaskPart;
-    type Output = Vec<(bool, u32)>;
+    type Output = Vec<CallableRegion>;
 
     fn region(&self) -> (&str, u32, u32) {
         (self.chrom.as_str(), self.begin, self.end)
     }
 
-    fn combine(&self, parts: &[Vec<(u32, u32)>]) -> Self::Output {
+    fn combine(&self, parts: &[Vec<(u32, u32)>]) -> Vec<CallableRegion> {
         trace!("Combining results from TaskParts: {:?}", parts);
-        let mut res = vec![(false, 0); self.end as usize - self.begin as usize];
-        
+        let mut res = Vec::new();
+        let mut current_region: Option<CallableRegion> = None;
+
         for (index, (count, sum)) in parts.iter().flat_map(|v| v.iter()).enumerate() {
             trace!("count: {}", count);
-            let mean = *sum as f64 / self.num_tracks as f64;
-            if mean >= self.mean_depth_min {
-                let prop = *count as f64 / self.num_tracks as f64;
-                if prop >= self.depth_proportion {
-                    res[index].0 = true;
-                    res[index].1 = *count;
+            let mean = *sum as f64 / self.num_tracks as f64; // mean calculated based on number of individuals total
+            let prop = *count as f64 / self.num_tracks as f64; // prop calculated based on number of individuals total
+            if mean >= self.mean_depth_min && prop >= self.depth_proportion {
+                if let Some(ref mut region) = current_region {
+                    // check if current_region is not none
+                    // we have a current region, lets see if we can extend it
+                    if region.end == (self.begin as usize + index) as u32 && region.count == *count
+                    {
+                        region.end += 1;
+                    } else {
+                        // cant extend
+                        res.push(region.clone());
+                        *region = CallableRegion {
+                            count: *count,
+                            begin: (self.begin as usize + index) as u32,
+                            end: (self.begin as usize + index + 1) as u32,
+                        };
+                    }
+                } else {
+                    // no current region lets make one
+                    current_region = Some(CallableRegion {
+                        count: *count,
+                        begin: (self.begin as usize + index) as u32,
+                        end: (self.begin as usize + index + 1) as u32,
+                    });
                 }
+            } else if let Some(region) = current_region.take() {
+                res.push(region);
             }
         }
-        
+
+        // Push the last region if it exists
+        if let Some(region) = current_region {
+            res.push(region);
+        }
+
         trace!("Combined result: {:?}", res);
         res
     }
 }
 
-        
-
-        
-
+pub fn print_as_bed(chrom: &str, begin: u32, end: u32, regions: Vec<CallableRegion>) {
+    for region in regions.into_iter() {
+        println!(
+            "{}\t{}\t{}\t{}",
+            chrom,
+            region.begin + begin,
+            region.end + begin,
+            region.count
+        );
+    }
+}
 
 pub fn run_d4_tasks(
     d4_file_path: &str,
@@ -131,7 +175,7 @@ pub fn run_d4_tasks(
 
     for (chr, begin, end) in chrom_regions.iter() {
         tasks.push(TaskParent {
-            chrom: chr.to_string(), // Assuming `chr` is a reference type like `&str` or `String`
+            chrom: chr.to_string(),
             begin: *begin,
             end: *end,
             thresholds,
@@ -145,10 +189,128 @@ pub fn run_d4_tasks(
     let result = reader.run_tasks(tasks).unwrap();
     trace!("Tasks completed successfully");
 
-    // let mut out = HashMap::with_capacity(num_chroms);
+    
     for r in result.into_iter() {
-        println!("{}:{}-{}, {:?}", r.chrom, r.begin, r.end, r.output);
+        print_as_bed(r.chrom, r.begin, r.end, r.output.to_vec())
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type RowType = std::vec::IntoIter<i32>;
+    fn create_task_parent() -> TaskParent {
+        TaskParent {
+            chrom: String::from("chr1"),
+            begin: 0,
+            end: 10,
+            num_tracks: 10,
+            mean_depth_min: 10.0,
+            depth_proportion: 0.5,
+            thresholds: (0.0, 100.0), // this doesnt matter for combine tests
+        }
+    }
+
+    #[test]
+    fn test_combine_with_adjacent_regions_different_counts() {
+        let task: TaskParent = create_task_parent();
+
+        let parts = vec![vec![(5, 100), (5, 100), (10, 100), (10, 100)]];
+
+        let expected = vec![
+            CallableRegion {
+                count: 5,
+                begin: 0,
+                end: 2,
+            },
+            CallableRegion {
+                count: 10,
+                begin: 2,
+                end: 4,
+            },
+        ];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_combine_with_good_mean_bad_prop() {
+        let task: TaskParent = create_task_parent();
+
+        let parts = vec![vec![(2, 100), (2, 100), (10, 100), (10, 100)]];
+
+        let expected = vec![CallableRegion {
+            count: 10,
+            begin: 2,
+            end: 4,
+        }];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_combine_with_single_continuous_region() {
+        let task: TaskParent = create_task_parent();
+
+        let parts = vec![
+            vec![(5, 50), (5, 50), (5, 50)], // mean depth is 5 not callable
+        ];
+
+        let expected = vec![];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_combine_with_non_callable_regions() {
+        let task: TaskParent = create_task_parent();
+
+        let parts = vec![
+            vec![(1, 100), (1, 100), (5, 50), (5, 50)], // 0-2 okay mean but bad proportion. 2-4 okay proportion but bad mean
+        ];
+
+        let expected = vec![]; // No region should be returned
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_combine_with_multiple_separated_regions() {
+        let task: TaskParent = create_task_parent();
+
+        let parts = vec![
+            vec![(10, 100), (10, 100)], // callable
+            vec![(5, 50), (5, 50)],     // not callable
+            vec![(0, 0), (0, 0)],       // not callable
+            vec![(10, 100), (10, 100)], // callable
+        ];
+
+        let expected = vec![
+            CallableRegion {
+                count: 10,
+                begin: 0,
+                end: 2,
+            },
+            CallableRegion {
+                count: 10,
+                begin: 6,
+                end: 8,
+            },
+        ];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
 }

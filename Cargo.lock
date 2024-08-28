@@ -846,6 +846,7 @@ dependencies = [
  "d4",
  "env_logger 0.11.5",
  "log",
+ "noodles",
  "predicates",
 ]
 
@@ -857,6 +858,34 @@ checksum = "08959a387a676302eebf4ddbcbc611da04285579f76f88ee0506c63b1a61dd4b"
 dependencies = [
  "memchr",
  "version_check",
+]
+
+[[package]]
+name = "noodles"
+version = "0.79.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a67f576cd91c3d6fbc0d47b6817abb511519276380005788d8f69852cbfd621"
+dependencies = [
+ "noodles-bed",
+ "noodles-core",
+]
+
+[[package]]
+name = "noodles-bed"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c781b824d10b621df17d26fb5cd9d3cc8188aeabda7de7e36cde51f6015b31d"
+dependencies = [
+ "noodles-core",
+]
+
+[[package]]
+name = "noodles-core"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5a8c6b020d1205abef2b0fab4463a6c5ecc3c8f4d561ca8b0d1a42323376200"
+dependencies = [
+ "bstr",
 ]
 
 [[package]]

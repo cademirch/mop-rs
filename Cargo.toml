@@ -9,6 +9,7 @@ clap = {version = "4.5.16", features = ["derive"]}
 d4 = {git = "https://github.com/38/d4-format.git"}
 env_logger = "0.11.5"
 log = "0.4.22"
+noodles = { version = "0.79.0", features = ["core", "bed"] }
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
