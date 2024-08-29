@@ -1,2 +1,5 @@
 /target
 /scripts/bam_simulation
+/bench/.snakemake/*
+/bench/simulated_bams
+/bench/results

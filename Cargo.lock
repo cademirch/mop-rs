@@ -847,6 +847,7 @@ dependencies = [
  "env_logger 0.11.5",
  "log",
  "predicates",
+ "rayon",
 ]
 
 [[package]]

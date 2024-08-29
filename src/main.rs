@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::{ArgGroup, Parser};
 use core::f64;
 use d4_utils::run_d4_tasks;
+use rayon::ThreadPoolBuilder;
 
 #[derive(Eq, PartialEq, Hash)]
 pub struct Region {
@@ -38,6 +39,9 @@ struct Args {
 
     #[arg(short = 'c', long = "output-counts", default_value_t = false)]
     output_counts: bool,
+
+    #[arg(short = 't', long = "threads", default_value_t = 1)]
+    threads: usize,
 }
 
 fn main() -> Result<()> {
@@ -46,6 +50,7 @@ fn main() -> Result<()> {
     let thresholds = (args.min_depth, args.max_depth);
 
     // Run the D4 tasks with the provided file path and thresholds
+    ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
     run_d4_tasks(
         &args.d4_file,
         thresholds,

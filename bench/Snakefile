@@ -1,0 +1,109 @@
+MOPRS = "../target/release/moprs"
+NUM_BAMS = 5
+NUM_CHROMS = 3
+CHROM_LEN = 10_000_000
+MIN_DEPTH = 10
+MAX_DEPTH = 50
+MIN_DEPTH_MEAN = 5
+MIN_PROPORTION = 0.5
+MOPRS_THREADS = 4
+
+
+localrules: build
+
+rule all:
+    input:
+        "results/moprs.bed",
+        "results/mop.bed"
+
+rule build:
+    output: MOPRS
+    shell:
+        """
+        cargo build --release
+        """
+
+rule make_bams:
+    output:
+        bams = expand("results/simulated_bams/simulated_{i}.bam", i=range(1, NUM_BAMS+1)),
+        bam_indexes = expand("results/simulated_bams/simulated_{i}.bam.bai", i=range(1, NUM_BAMS+1)),
+        truth = "results/simulated_bams/truth.bed",
+        bamlist = "results/simulated_bams/bamlist.txt"
+    params:
+        num_bams = NUM_BAMS,
+        num_chrs = NUM_CHROMS,
+        chr_length = CHROM_LEN,
+        min_depth = MIN_DEPTH,
+        max_depth = MAX_DEPTH,
+        min_mean_depth = MIN_DEPTH_MEAN,
+        proportion = MIN_PROPORTION,
+        outdir = "results/simulated_bams/"
+    script:
+        "scripts/generate_bam.py"
+
+rule mosdepth:
+    input:
+        bam = "results/simulated_bams/simulated_{i}.bam",
+        index = "results/simulated_bams/simulated_{i}.bam.bai"
+    output:
+        "results/simulated_{i}.per-base.d4"
+    params:
+        prefix=lambda wc, output: output[0].replace(".per-base.d4", ""),
+    shadow: "minimal"
+    benchmark: 
+        "results/benchmarks/mosdepth/{i}.txt" 
+    shell:
+        """
+        mosdepth --d4 {params.prefix} {input.bam}
+        """
+    
+rule merge_d4:
+    input:
+        expand("results/simulated_{i}.per-base.d4", i=range(1, NUM_BAMS+1))
+    output:
+        "results/merged.d4"
+    benchmark: 
+        "results/benchmarks/merge_d4.txt"
+    shell:
+        """
+        d4tools merge {input} {output}
+        """
+
+
+rule pymop:
+    input:
+        bams = expand("results/simulated_bams/simulated_{i}.bam", i=range(1, NUM_BAMS+1)),
+        bamlist = "results/simulated_bams/bamlist.txt"
+    output:
+        "results/mop.bed"
+    params:
+        min_depth = f"-i {MIN_DEPTH}",
+        max_depth = f"-x {MAX_DEPTH}",
+        min_mean_depth = f"-M {MIN_DEPTH_MEAN}",
+        proportion = f"-m {MIN_PROPORTION}"
+    benchmark:
+        "results/benchmarks/mop.txt"
+    shell:
+        """
+        mop {params} -b {input.bamlist} > {output}
+        """
+
+rule moprs:
+    input:
+        moprs_binary = MOPRS,
+        d4 = "results/merged.d4"
+    output:
+        "results/moprs.bed"
+    params:
+        min_depth = f"-m {MIN_DEPTH}",
+        max_depth = f"-M {MAX_DEPTH}",
+        min_mean_depth = f"-u {MIN_DEPTH_MEAN}",
+        proportion = f"-d {MIN_PROPORTION}"
+    threads: MOPRS_THREADS
+    benchmark:
+        "results/benchmarks/moprs.txt"
+    shell:
+        """
+        {input.moprs_binary} {params} -t {threads} --d4 {input.d4} > {output}
+        """
+    
