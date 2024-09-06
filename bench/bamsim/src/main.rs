@@ -78,17 +78,16 @@ fn write_bam(
         res.insert(chr_index, sum_count);
         let mut rec = HeaderRecord::new(b"SQ");
         rec.push_tag(b"SN", &format!("sq{}", chr_index).to_string())
-            .push_tag(b"LN", &chr_index);
+            .push_tag(b"LN", chr_length);
         bam_header.push_record(&rec);
     }
 
     std::fs::create_dir_all(&outdir)?;
-    let bamlist_path = Path::new(&outdir).join("bamlist.txt");
-    let mut bamlist = File::create(&bamlist_path)?;
+    
 
     for bam_index in 0..num_bams {
         let file_path = Path::new(&outdir).join(format!("{}.bam", bam_index));
-        writeln!(bamlist, "{}", file_path.display())?;
+        
         let mut writer = Writer::from_path(&file_path, &bam_header, Format::Bam)?;
         let _ = writer.set_threads(8);
         let mut rng = rand::thread_rng();
@@ -126,15 +125,13 @@ fn write_bam(
                         &quality,
                     );
                     rec.set_pos(*start as i64);
-                    rec.set_tid(0);
+                    rec.set_tid(chr_index as i32);
                     rec.set_flags(0);
                     writer.write(&rec)?;
                 }
             }
         }
-        drop(writer);
-
-        index::build(file_path, None, index::Type::Bai, 8)?;
+        
 
     }
     Ok(res)
@@ -153,7 +150,7 @@ fn make_truth_file(
     let mut file = File::create(truth_path)?;
 
     for chr_num in 0..num_chromosomes {
-        let chromosome = format!("sq{}", chr_num + 1);
+        let chromosome = format!("sq{}", chr_num);
         if let Some(data) = truth.get(&chr_num) {
             let mut merged_intervals: Vec<(usize, usize)> = Vec::new();
             let mut current_start: Option<usize> = None;

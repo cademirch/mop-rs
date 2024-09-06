@@ -2,7 +2,7 @@ MOPRS = "../target/release/moprs"
 BAMSIM = "../target/release/bamsim"
 NUM_BAMS = 5
 NUM_CHROMS = 3
-CHROM_LEN = 10_000_000
+CHROM_LEN = 100_000_000
 MIN_DEPTH = 10
 MAX_DEPTH = 50
 MIN_DEPTH_MEAN = 5
@@ -14,9 +14,11 @@ localrules: build
 
 rule all:
     input:
-        "results/simulated_bams/bamlist.txt"
-        # "results/moprs.bed",
-        # "results/mop.bed"
+        "results/simulated_bams/bamlist.txt",
+        "results/moprs.bed",
+        "results/mop.bed",
+        "results/cmp.out",
+        "results/plot.png"
 
 rule build:
     output: MOPRS, BAMSIM
@@ -26,12 +28,13 @@ rule build:
         """
 
 rule make_bams:
+    input:
+        bamsim_binary = BAMSIM,
     output:
-        bamsim_binary = BAMSIM
-        bams = expand("results/simulated_bams/{i}.bam", i=range(0, NUM_BAMS)),
-        bam_indexes = expand("results/simulated_bams/{i}.bam.bai", i=range(0, NUM_BAMS)),
-        truth = "results/simulated_bams/truth.bed",
-        bamlist = "results/simulated_bams/bamlist.txt"
+        bams = temp(expand("results/simulated_bams/raw/{i}.bam", i=range(0, NUM_BAMS))),
+        truth = "results/simulated_bams/raw/truth.bed",
+        
+    benchmark: "results/benchmarks/bamsim.txt"
     params:
         num_bams = f"--num-bams {NUM_BAMS}",
         num_chrs = f"--num-chrs {NUM_CHROMS}",
@@ -40,12 +43,33 @@ rule make_bams:
         max_depth = f"--max-depth {MAX_DEPTH}",
         min_mean_depth = f"--min-mean-depth {MIN_DEPTH_MEAN}",
         proportion = f"--proportion {MIN_PROPORTION}",
-        outdir = f"--outdir results/simulated_bams/"
-    threads = 8 # hardcoded in bamsim
+        outdir = f"--outdir results/simulated_bams/raw"
+    threads: 8 # hardcoded in bamsim
     shell:
         """
         {input.bamsim_binary} {params}
+
         """
+
+rule sort_index:
+    input:
+        "results/simulated_bams/raw/{i}.bam"
+    output:
+        bam = "results/simulated_bams/{i}.bam",
+        index = "results/simulated_bams/{i}.bam.bai"
+    shell:
+        """
+        samtools sort {input} > {output.bam} && samtools index {output.bam}
+        """
+
+rule make_bamlist:
+    input:
+        bams = expand("results/simulated_bams/{i}.bam", i=range(0, NUM_BAMS))
+    output:
+        bamlist = "results/simulated_bams/bamlist.txt"
+    run:
+        with open(output.bamlist, "w") as f:
+            f.writelines("\n".join(input.bams))
 
 rule mosdepth:
     input:
@@ -113,3 +137,23 @@ rule moprs:
         {input.moprs_binary} {params} -t {threads} --d4 {input.d4} > {output}
         """
     
+rule check_output:
+    input:
+        mop_bed = "results/mop.bed",
+        moprs_bed = "results/moprs.bed",
+        truth = "results/simulated_bams/raw/truth.bed",
+    output:
+        "results/cmp.out"
+    shell:
+        """
+        cmp {input.mop_bed} {input.truth} > {output}
+        cmp {input.moprs_bed} {input.truth} >> {output}
+        """
+
+rule plot:
+    input:
+        "results/cmp.out"
+    output:
+        "results/plot.png"
+    script:
+        "scripts/plot.py"
