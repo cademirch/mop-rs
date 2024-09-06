@@ -24,12 +24,13 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
 
     fn new(part_begin: u32, part_end: u32, parent: &Self::ParentType) -> Self {
         trace!(
-            "Creating new TaskPart for region: {}-{}, in parent: {}:{}-{}",
+            "Creating new TaskPart for region: {}-{}, in parent: {}:{}-{}.\nCountSum length: {}",
             part_begin,
             part_end,
             parent.chrom,
             parent.begin,
-            parent.end
+            parent.end,
+            part_end-part_begin        
         );
         Self {
             parent_region: (parent.chrom.clone(), parent.begin, parent.end),
@@ -49,10 +50,12 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
         if right - left > 1 {
             panic!("Invalid range: {}-{} in task partition in parent: {:?}. The difference between right and left must be 1.", left, right, self.parent_region);
         }
-
+        
         for v in value.into_iter() {
             trace!("Value: {:?}", v);
-            self.count_sum[left as usize].1 += v as u32;
+            let adjusted_left = (left as usize) % self.count_sum.len();
+
+            self.count_sum[adjusted_left].1 += v as u32;
             trace!(
                 "Testing if {:?} is greater than {} and less than {}",
                 v,
@@ -60,7 +63,7 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> TaskPartition<T> for TaskPart 
                 self.thresholds.1
             );
             if v as f64 >= self.thresholds.0 && v as f64 <= self.thresholds.1 {
-                self.count_sum[left as usize].0 += 1
+                self.count_sum[adjusted_left].0 += 1
             }
         }
         true
