@@ -1,3 +1,6 @@
+[workspace]
+members = [".","./bench/bamsim"]
+
 [package]
 name = "moprs"
 version = "0.1.0"

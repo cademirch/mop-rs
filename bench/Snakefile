@@ -1,4 +1,5 @@
 MOPRS = "../target/release/moprs"
+BAMSIM = "../target/release/bamsim"
 NUM_BAMS = 5
 NUM_CHROMS = 3
 CHROM_LEN = 10_000_000
@@ -13,40 +14,45 @@ localrules: build
 
 rule all:
     input:
-        "results/moprs.bed",
-        "results/mop.bed"
+        "results/simulated_bams/bamlist.txt"
+        # "results/moprs.bed",
+        # "results/mop.bed"
 
 rule build:
-    output: MOPRS
+    output: MOPRS, BAMSIM
     shell:
         """
-        cargo build --release
+        cargo build --release --workspace
         """
 
 rule make_bams:
     output:
-        bams = expand("results/simulated_bams/simulated_{i}.bam", i=range(1, NUM_BAMS+1)),
-        bam_indexes = expand("results/simulated_bams/simulated_{i}.bam.bai", i=range(1, NUM_BAMS+1)),
+        bamsim_binary = BAMSIM
+        bams = expand("results/simulated_bams/{i}.bam", i=range(0, NUM_BAMS)),
+        bam_indexes = expand("results/simulated_bams/{i}.bam.bai", i=range(0, NUM_BAMS)),
         truth = "results/simulated_bams/truth.bed",
         bamlist = "results/simulated_bams/bamlist.txt"
     params:
-        num_bams = NUM_BAMS,
-        num_chrs = NUM_CHROMS,
-        chr_length = CHROM_LEN,
-        min_depth = MIN_DEPTH,
-        max_depth = MAX_DEPTH,
-        min_mean_depth = MIN_DEPTH_MEAN,
-        proportion = MIN_PROPORTION,
-        outdir = "results/simulated_bams/"
-    script:
-        "scripts/generate_bam.py"
+        num_bams = f"--num-bams {NUM_BAMS}",
+        num_chrs = f"--num-chrs {NUM_CHROMS}",
+        chr_length = f"--chr-length {CHROM_LEN}",
+        min_depth = f"--min-depth {MIN_DEPTH}",
+        max_depth = f"--max-depth {MAX_DEPTH}",
+        min_mean_depth = f"--min-mean-depth {MIN_DEPTH_MEAN}",
+        proportion = f"--proportion {MIN_PROPORTION}",
+        outdir = f"--outdir results/simulated_bams/"
+    threads = 8 # hardcoded in bamsim
+    shell:
+        """
+        {input.bamsim_binary} {params}
+        """
 
 rule mosdepth:
     input:
-        bam = "results/simulated_bams/simulated_{i}.bam",
-        index = "results/simulated_bams/simulated_{i}.bam.bai"
+        bam = "results/simulated_bams/{i}.bam",
+        index = "results/simulated_bams/{i}.bam.bai"
     output:
-        "results/simulated_{i}.per-base.d4"
+        "results/{i}.per-base.d4"
     params:
         prefix=lambda wc, output: output[0].replace(".per-base.d4", ""),
     shadow: "minimal"
@@ -59,7 +65,7 @@ rule mosdepth:
     
 rule merge_d4:
     input:
-        expand("results/simulated_{i}.per-base.d4", i=range(1, NUM_BAMS+1))
+        expand("results/{i}.per-base.d4", i=range(0, NUM_BAMS))
     output:
         "results/merged.d4"
     benchmark: 
@@ -72,7 +78,7 @@ rule merge_d4:
 
 rule pymop:
     input:
-        bams = expand("results/simulated_bams/simulated_{i}.bam", i=range(1, NUM_BAMS+1)),
+        bams = expand("results/simulated_bams/{i}.bam", i=range(0, NUM_BAMS)),
         bamlist = "results/simulated_bams/bamlist.txt"
     output:
         "results/mop.bed"
