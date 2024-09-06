@@ -24,21 +24,27 @@ struct Args {
     /// The path to the D4 file
     #[arg(long = "d4")]
     d4_file: String,
+    
     /// Minimum depth to consider site callable per individual
     #[arg(short = 'm', long = "min-depth", default_value_t = 0.0)]
     min_depth: f64,
+    
     /// Maximum depth to consider site callable per individual
     #[arg(short = 'M', long = "max-depth", default_value_t = f64::INFINITY)]
     max_depth: f64,
+    
     /// Proporition of samples passing thresholds at site to consider callable
     #[arg(short = 'd', long = "depth-proportion", default_value_t = 1.0)]
     depth_proportion: f64,
+    
     /// Minimum mean depth across all samples at site to consider callable
     #[arg(short = 'u', long = "min-mean-depth", default_value_t = 0.0)]
     mean_depth_min: f64,
-    /// Output number of individuals callable at site
+    
+    /// Output number of individuals callable at site. EXPERIMENTAL v0.1.0
     #[arg(short = 'c', long = "output-counts", default_value_t = false)]
     output_counts: bool,
+    
     /// Number of threads to use
     #[arg(short = 't', long = "threads", default_value_t = 1)]
     threads: usize,
