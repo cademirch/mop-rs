@@ -3,7 +3,7 @@ use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rust_htslib::bam::header::{self, Header, HeaderRecord};
 use rust_htslib::bam::record::{Cigar, CigarString, Record};
-use rust_htslib::bam::{Format, Writer};
+use rust_htslib::bam::{Format, Writer, index};
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::fs::File;
@@ -132,6 +132,10 @@ fn write_bam(
                 }
             }
         }
+        drop(writer);
+
+        index::build(file_path, None, index::Type::Bai, 8)?;
+
     }
     Ok(res)
 }
