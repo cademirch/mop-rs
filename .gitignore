@@ -3,3 +3,7 @@
 /bench/.snakemake/*
 /bench/simulated_bams
 /bench/results
+/bench/samtools*
+/tests/data/*.bam*
+/tests/data/*mosdepth*
+/tests/data/test.bed

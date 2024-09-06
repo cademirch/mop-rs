@@ -5,6 +5,7 @@ members = [".","./bench/bamsim"]
 name = "moprs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Cade Mirchandani"]
 
 [dependencies]
 anyhow = "1.0.86"
