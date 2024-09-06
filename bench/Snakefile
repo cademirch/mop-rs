@@ -1,7 +1,7 @@
 MOPRS = "../target/release/moprs"
 BAMSIM = "../target/release/bamsim"
 NUM_BAMS = 5
-NUM_CHROMS = 3
+NUM_CHROMS = 5
 CHROM_LEN = 100_000_000
 MIN_DEPTH = 10
 MAX_DEPTH = 50
@@ -111,11 +111,13 @@ rule pymop:
         max_depth = f"-x {MAX_DEPTH}",
         min_mean_depth = f"-M {MIN_DEPTH_MEAN}",
         proportion = f"-m {MIN_PROPORTION}"
+    log:
+        "results/log/mop.txt"
     benchmark:
         "results/benchmarks/mop.txt"
     shell:
         """
-        mop {params} -b {input.bamlist} > {output}
+        mop {params} -b {input.bamlist} > {output} 2> {log}
         """
 
 rule moprs:
@@ -130,11 +132,14 @@ rule moprs:
         min_mean_depth = f"-u {MIN_DEPTH_MEAN}",
         proportion = f"-d {MIN_PROPORTION}"
     threads: MOPRS_THREADS
+    log: "results/log/moprs.txt"
     benchmark:
         "results/benchmarks/moprs.txt"
     shell:
         """
-        {input.moprs_binary} {params} -t {threads} --d4 {input.d4} > {output}
+        RUST_BACKTRACE=1
+        RUST_LOG=trace
+        {input.moprs_binary} {params} -t {threads} --d4 {input.d4} > {output} 2> {log}
         """
     
 rule check_output:

@@ -73,7 +73,7 @@ fn write_bam(
     let mut res = HashMap::new();
     let mut bam_header = Header::new();
 
-    for chr_index in 0..=num_chrs {
+    for chr_index in 0..num_chrs {
         let sum_count = vec![(0, 0); chr_length];
         res.insert(chr_index, sum_count);
         let mut rec = HeaderRecord::new(b"SQ");
