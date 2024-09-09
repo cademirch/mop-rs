@@ -159,6 +159,9 @@ rule plot:
     input:
         "results/cmp.out"
     output:
-        "results/plot.png"
+        "results/total_time_plot.png",
+        'results/moprs_components_plot.png'
+    conda:
+        "envs/r.yaml"
     script:
-        "scripts/plot.py"
+        "scripts/plot.R"

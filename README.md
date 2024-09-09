@@ -41,3 +41,16 @@ Options:
 
 ## Contributing
 If you would like to contribute, please feel free to fork the repo and open a PR. If you encounter any bugs or issues, please report them via the issues page.
+
+
+## Performance
+A benchmarking workflow is available in the `bench/` directory. Included is a small tool to simulate  BAMs and truth of callable regions. The workflow runs both mop and moprs on the same data. 
+
+Below is a plot showing the time taken by each tool to process a dataset consisting of 5 BAM files, each representing a 500-megabase genome: 
+
+
+![perf plot](bench/results/total_time_plot.png)
+
+*Note*: The time for moprs includes the mean time to run mosdepth for the 5 BAM files, as these runs are performed in parallel. Additionally, the moprs time accounts for merging the 5 D4 files using d4tools merge. Below shows the time for each step in the moprs workflow (mosdepth, d4tools, moprs).
+
+![component plot](bench/results/moprs_components_plot.png)
