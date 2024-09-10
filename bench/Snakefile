@@ -18,7 +18,8 @@ rule all:
         "results/moprs.bed",
         "results/mop.bed",
         "results/cmp.out",
-        "results/plot.png"
+        "results/moprs_components_table.csv"
+        
 
 rule build:
     output: MOPRS, BAMSIM
@@ -159,8 +160,7 @@ rule plot:
     input:
         "results/cmp.out"
     output:
-        "results/total_time_plot.png",
-        'results/moprs_components_plot.png'
+        "results/moprs_components_table.csv"
     conda:
         "envs/r.yaml"
     script:
