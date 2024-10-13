@@ -14,7 +14,7 @@ fn test_moprs_output() -> Result<(), Box<dyn std::error::Error>> {
         .arg("-m").arg("3")
         .arg("-M").arg("20")
         .arg("-d").arg("1.0")
-        .arg("-u").arg("10");
+        .arg("-u").arg("9");
 
     
     let output_file = "test.bed";
