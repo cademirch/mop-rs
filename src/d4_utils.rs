@@ -3,7 +3,7 @@ use d4::{
     task::{Task, TaskPartition},
     D4MatrixReader, D4TrackReader, MultiTrackReader,
 };
-use log::trace;
+use log::{debug, trace};
 use std::{panic, path::Path}; // Make sure to include this import for tracing
 pub struct TaskPart {
     parent_region: (String, u32, u32),
@@ -80,7 +80,7 @@ pub struct TaskParent {
     begin: u32,
     end: u32,
     thresholds: (f64, f64),
-    mean_depth_min: f64,
+    mean_thresholds: (f64, f64),
     depth_proportion: f64,
     num_tracks: usize,
     output_counts: bool,
@@ -103,7 +103,13 @@ impl<T: Iterator<Item = i32> + ExactSizeIterator> Task<T> for TaskParent {
             trace!("count: {}", count);
             let mean = *sum as f64 / self.num_tracks as f64; // mean calculated based on number of individuals total
             let prop = *count as f64 / self.num_tracks as f64; // prop calculated based on number of individuals total
-            if mean >= self.mean_depth_min && prop >= self.depth_proportion {
+            debug!(
+                "mean: {}, mean thresholds: {},{}",
+                mean, self.mean_thresholds.0, self.mean_thresholds.1
+            );
+            if (self.mean_thresholds.0 < mean && mean < self.mean_thresholds.1)
+                && prop >= self.depth_proportion
+            {
                 if let Some(ref mut region) = current_region {
                     // check if current_region is not none
                     // we have a current region, lets see if we can extend it
@@ -151,7 +157,6 @@ pub fn print_as_bed(chrom: &str, begin: u32, output_counts: bool, regions: Vec<C
                 chrom,
                 region.begin + begin,
                 region.end + begin,
-                
             );
         } else {
             println!(
@@ -162,14 +167,13 @@ pub fn print_as_bed(chrom: &str, begin: u32, output_counts: bool, regions: Vec<C
                 region.count
             );
         }
-        
     }
 }
 
 pub fn run_d4_tasks(
     d4_file_path: &str,
     thresholds: (f64, f64),
-    mean_depth_min: f64,
+    mean_thresholds: (f64, f64),
     depth_proportion: f64,
     output_counts: bool,
 ) -> Result<()> {
@@ -192,7 +196,7 @@ pub fn run_d4_tasks(
             begin: *begin,
             end: *end,
             thresholds,
-            mean_depth_min,
+            mean_thresholds,
             depth_proportion,
             num_tracks: num_tracks,
             output_counts,
@@ -212,9 +216,11 @@ pub fn run_d4_tasks(
 
 #[cfg(test)]
 mod tests {
-    
 
     use super::*;
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
 
     type RowType = std::vec::IntoIter<i32>;
     fn create_task_parent(output_counts: bool) -> TaskParent {
@@ -223,7 +229,7 @@ mod tests {
             begin: 0,
             end: 10,
             num_tracks: 10,
-            mean_depth_min: 10.0,
+            mean_thresholds: (10.0, 100.0),
             depth_proportion: 0.5,
             thresholds: (0.0, 100.0), // this doesnt matter for combine tests
             output_counts: output_counts,
@@ -235,15 +241,13 @@ mod tests {
         let output_counts = false;
         let task: TaskParent = create_task_parent(output_counts);
 
-        let parts = vec![vec![(5, 100), (5, 100), (10, 100), (10, 100)]];
+        let parts = vec![vec![(5, 101), (5, 101), (10, 101), (10, 101)]];
 
-        let expected = vec![
-            CallableRegion {
-                count: 5,
-                begin: 0,
-                end: 4,
-            },
-        ];
+        let expected = vec![CallableRegion {
+            count: 5,
+            begin: 0,
+            end: 4,
+        }];
 
         let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
 
@@ -255,7 +259,7 @@ mod tests {
         let output_counts = true;
         let task: TaskParent = create_task_parent(output_counts);
 
-        let parts = vec![vec![(5, 100), (5, 100), (10, 100), (10, 100)]];
+        let parts = vec![vec![(5, 101), (5, 101), (10, 101), (10, 101)]];
 
         let expected = vec![
             CallableRegion {
@@ -275,13 +279,12 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-
     #[test]
     fn combine_good_mean_bad_prop() {
         let output_counts = false;
         let task: TaskParent = create_task_parent(output_counts);
 
-        let parts = vec![vec![(2, 100), (2, 100), (10, 100), (10, 100)]];
+        let parts = vec![vec![(2, 101), (2, 101), (10, 101), (10, 101)]];
 
         let expected = vec![CallableRegion {
             count: 10,
@@ -332,10 +335,10 @@ mod tests {
         let task: TaskParent = create_task_parent(output_counts);
 
         let parts = vec![
-            vec![(10, 100), (10, 100)], // callable
+            vec![(10, 101), (10, 101)], // callable
             vec![(5, 50), (5, 50)],     // not callable
             vec![(0, 0), (0, 0)],       // not callable
-            vec![(10, 100), (10, 100)], // callable
+            vec![(10, 101), (10, 101)], // callable
         ];
 
         let expected = vec![
@@ -350,6 +353,108 @@ mod tests {
                 end: 8,
             },
         ];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+    #[test]
+    fn combine_below_mean_threshold() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        // Mean depth is 9.9, which is just below the lower threshold (10.0)
+        let parts = vec![vec![(10, 99), (10, 99), (10, 99), (10, 99)]];
+
+        let expected = vec![]; // No region should be returned since the mean is below the threshold
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_above_mean_threshold() {
+        init();
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        // Mean depth is 101, which is above the upper threshold (100.0)
+        let parts = vec![vec![(10, 1001), (10, 1001), (10, 1001), (10, 1001)]];
+
+        let expected = vec![]; // No region should be returned since the mean is above the threshold
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_within_mean_threshold() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        // Mean depth is exactly 10, which is on the lower bound of the threshold
+        let parts = vec![vec![(10, 101), (10, 101), (10, 999), (10, 999)]];
+
+        let expected = vec![CallableRegion {
+            count: 10,
+            begin: 0,
+            end: 4,
+        }]; // The entire region should be returned since the mean is within the threshold
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_on_upper_mean_threshold() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        
+        let parts = vec![vec![(10, 999), (10, 999), (10, 999), (10, 999)]];
+
+        let expected = vec![CallableRegion {
+            count: 10,
+            begin: 0,
+            end: 4,
+        }]; // The entire region should be returned since the mean is on the upper bound
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_with_mean_exactly_on_boundaries() {
+        init();
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        // Mean depth is exactly on the boundaries
+        let parts = vec![
+            vec![(10, 100), (10, 100)],   // mean = 10 (lower boundary)
+            vec![(10, 1000), (10, 1000)], // mean = 100 (upper boundary)
+        ];
+
+        let expected = vec![];
+
+        let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn combine_mean_below_threshold_non_callable() {
+        let output_counts = false;
+        let task: TaskParent = create_task_parent(output_counts);
+
+        // Mean depth is too low, below the threshold
+        let parts = vec![vec![(2, 5), (2, 5), (2, 5), (2, 5)]]; // mean depth = 2.5
+
+        let expected = vec![]; // No region should be returned because the mean is too low
 
         let result: Vec<CallableRegion> = Task::<RowType>::combine(&task, &parts);
 
